@@ -97,7 +97,7 @@ class BridgeDiscordService:
                             )
                             if message.type == aiohttp.WSMsgType.TEXT:
                                 data = json.loads(message.data)
-                                print(f"[QR] Message for {user_id}: {data}")                  
+                                print(f"[QR] Message for {user_id}: {data}")
                                 if data.get('success'):
                                     print(f"[QR] Login successful for {user_id}")
                                     break
