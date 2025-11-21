@@ -50,28 +50,43 @@ class BridgeDiscordService:
             if user_id in self.active_ws_sessions:
                 old_task = self.active_ws_sessions[user_id]['task']
                 old_task.cancel()
+                await asyncio.gather(old_task, return_exceptions=True)
+                del self.active_ws_sessions[user_id]
                 print(f"[QR] Cancelled previous session for {user_id}")
+            
+            qr_ready_event = asyncio.Event()
+
             task = asyncio.create_task(
-                self._manage_qr_session(websocket_url, user_id)
+                self._manage_qr_session(websocket_url, user_id , qr_ready_event)
             )
             self.active_ws_sessions[user_id] = {
                 'task': task,
                 'qr_code': None
             }
-            for _ in range(50):
-                await asyncio.sleep(0.1)
-                if self.active_ws_sessions[user_id]['qr_code']:
-                    qr_data = self.active_ws_sessions[user_id]['qr_code']
-                    return qr_data, 200
+
+            # for _ in range(50):
+            #     await asyncio.sleep(0.1)
+            #     if self.active_ws_sessions[user_id]['qr_code']:
+            #         qr_data = self.active_ws_sessions[user_id]['qr_code']
+            #         return qr_data, 200
+            try:
+                await asyncio.wait_for(qr_ready_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                raise Exception("Failed to get QR code within 5 seconds")
+            session = self.active_ws_sessions.get(user_id)
+            if session and session['qr_code']:
+                return session['qr_code'], 200
             
             raise Exception("Failed to get QR code within 5 seconds")   
         except Exception as e:
             if user_id in self.active_ws_sessions:
-                self.active_ws_sessions[user_id]['task'].cancel()
+                task = self.active_ws_sessions[user_id]['task']
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
                 del self.active_ws_sessions[user_id]
             raise HTTPException(status_code=500, detail=f"internal server error: {e}")
     
-    async def _manage_qr_session(self, websocket_url: str, user_id: str):
+    async def _manage_qr_session(self, websocket_url: str, user_id: str , qr_ready_event: asyncio.Event):
         print(f"[QR] Started session for {user_id}")
         try:
             async with aiohttp.ClientSession() as session:
@@ -82,6 +97,7 @@ class BridgeDiscordService:
                     message_data = json.loads(message.data)
                     if user_id in self.active_ws_sessions:
                         self.active_ws_sessions[user_id]['qr_code'] = message_data
+                        qr_ready_event.set()
                     timeout = 120
                     start_time = asyncio.get_event_loop().time()
                     while True:
@@ -110,6 +126,7 @@ class BridgeDiscordService:
                     
         except asyncio.CancelledError:
             print(f"[QR] Cancelled for {user_id}")
+            raise
         except Exception as e:
             print(f"[QR] Error for {user_id}: {e}")
         finally:
