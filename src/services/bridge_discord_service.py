@@ -47,11 +47,11 @@ class BridgeDiscordService:
     async def login_with_qr(self, user_id: str) -> tuple[dict[str, Any], int]:
         websocket_url = f"{self.base_url.replace('https://', 'wss://').replace('http://', 'ws://')}/_matrix/provision/v1/login/qr?user_id={user_id}"
         try:
-            if user_id in self.active_ws_sessions:
-                old_task = self.active_ws_sessions[user_id]['task']
+            old_session = self.active_ws_sessions.pop(user_id, None)
+            if old_session:
+                old_task = old_session['task']
                 old_task.cancel()
                 await asyncio.gather(old_task, return_exceptions=True)
-                del self.active_ws_sessions[user_id]
                 print(f"[QR] Cancelled previous session for {user_id}")
             
             qr_ready_event = asyncio.Event()
@@ -79,11 +79,11 @@ class BridgeDiscordService:
             
             raise Exception("Failed to get QR code within 5 seconds")   
         except Exception as e:
-            if user_id in self.active_ws_sessions:
-                task = self.active_ws_sessions[user_id]['task']
+            session = self.active_ws_sessions.pop(user_id, None)
+            if session:
+                task = session['task']
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-                del self.active_ws_sessions[user_id]
             raise HTTPException(status_code=500, detail=f"internal server error: {e}")
     
     async def _manage_qr_session(self, websocket_url: str, user_id: str , qr_ready_event: asyncio.Event):
