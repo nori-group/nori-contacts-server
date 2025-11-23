@@ -37,3 +37,23 @@ async def create_platform_contacts_table(conn: asyncpg.Connection):
 async def create_all_tables(conn: asyncpg.Connection):
     await create_contact_cards_table(conn)
     await create_platform_contacts_table(conn)
+    
+    # Add foreign key after both tables exist to avoid circular dependency
+    await conn.execute("""
+        ALTER TABLE contact_cards 
+        ADD COLUMN IF NOT EXISTS default_platform_contact_id UUID;
+        
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'fk_default_platform_contact'
+            ) THEN
+                ALTER TABLE contact_cards 
+                ADD CONSTRAINT fk_default_platform_contact 
+                FOREIGN KEY (default_platform_contact_id) 
+                REFERENCES platform_contacts(id) 
+                ON DELETE SET NULL;
+            END IF;
+        END $$;
+    """)
+    print("contact_cards foreign key checked/added.")

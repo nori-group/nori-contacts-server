@@ -24,6 +24,7 @@ class ContactCardServicer:
             contact.contact_name,
             contact.nickname,
             contact.contact_avatar_url,
+            contact.default_platform_contact_id,
         )
 
     async def update_contact_card(
@@ -46,6 +47,7 @@ class ContactCardServicer:
             contact.contact_name,
             contact.nickname,
             contact.contact_avatar_url,
+            contact.default_platform_contact_id,
         )
         if updated_contact_card is None:
             raise HTTPException(

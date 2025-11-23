@@ -14,6 +14,7 @@ class ContactCard(BaseModel):
     contact_name: str
     nickname: str | None = None
     contact_avatar_url: str | None = None
+    default_platform_contact_id: UUID | None = None
 
 
 class PlatformContact(BaseModel):
