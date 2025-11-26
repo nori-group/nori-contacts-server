@@ -37,7 +37,7 @@ async def create_platform_contacts_table(conn: asyncpg.Connection):
 async def create_all_tables(conn: asyncpg.Connection):
     await create_contact_cards_table(conn)
     await create_platform_contacts_table(conn)
-    
+
     # Add foreign key after both tables exist to avoid circular dependency
     await conn.execute("""
         ALTER TABLE contact_cards 
