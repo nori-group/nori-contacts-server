@@ -9,6 +9,7 @@ async def create_contact_cards_table(conn: asyncpg.Connection):
             contact_name VARCHAR NOT NULL,
             nickname VARCHAR,
             contact_avatar_url VARCHAR,
+            default_platform_contact_id UUID,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -33,16 +34,9 @@ async def create_platform_contacts_table(conn: asyncpg.Connection):
     """)
     print("platform_contacts table checked/created.")
 
-
-async def create_all_tables(conn: asyncpg.Connection):
-    await create_contact_cards_table(conn)
-    await create_platform_contacts_table(conn)
-
+async def create_foreign_key(conn: asyncpg.Connection):
     # Add foreign key after both tables exist to avoid circular dependency
     await conn.execute("""
-        ALTER TABLE contact_cards 
-        ADD COLUMN IF NOT EXISTS default_platform_contact_id UUID;
-        
         DO $$
         BEGIN
             IF NOT EXISTS (
@@ -57,3 +51,9 @@ async def create_all_tables(conn: asyncpg.Connection):
         END $$;
     """)
     print("contact_cards foreign key checked/added.")
+
+
+async def create_all_tables(conn: asyncpg.Connection):
+    await create_contact_cards_table(conn)
+    await create_platform_contacts_table(conn)
+    await create_foreign_key(conn)
