@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     BRIDGE_TELEGRAM_SHARED_SECRET: str
     BRIDGE_DISCORD_URL: str
     BRIDGE_DISCORD_SHARED_SECRET: str
+    BACKEND_CORS_ORIGINS: list[str] = []
 
     @property
     def database_url(self):
