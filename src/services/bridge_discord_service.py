@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 import json
 from typing import Any
@@ -20,6 +21,7 @@ class BridgeDiscordService:
             "Authorization": f"Bearer {self.shared_secret}",
             "Content-Type": "application/json",
         }
+        self.active_ws_sessions: dict[str, dict] = {}
 
     async def _make_request(
         self,
@@ -28,6 +30,7 @@ class BridgeDiscordService:
         data: dict[str, Any] | None = None,
     ) -> tuple[dict[str, Any], int]:
         url = f"{self.base_url}/_matrix/provision/v1{endpoint}"
+        print(url)
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.request(
@@ -42,19 +45,89 @@ class BridgeDiscordService:
         except Exception as e:
             return {"error": f"Request failed: {str(e)}"}, 500
 
+    async def _cancel_existing_session(self, user_id: str):
+        old_session = self.active_ws_sessions.pop(user_id, None)
+        if old_session:
+            old_task = old_session["task"]
+            old_task.cancel()
+            await asyncio.gather(old_task, return_exceptions=True)
+            print(f"[QR] Cancelled previous session for {user_id}")
+
     async def login_with_qr(self, user_id: str) -> tuple[dict[str, Any], int]:
-        # http or https
         websocket_url = f"{self.base_url.replace('https://', 'wss://').replace('http://', 'ws://')}/_matrix/provision/v1/login/qr?user_id={user_id}"
+        timeout = 10.0
+        try:
+            await self._cancel_existing_session(user_id)
+            qr_ready_event = asyncio.Event()
+            task = asyncio.create_task(
+                self._manage_qr_session(websocket_url, user_id, qr_ready_event)
+            )
+            self.active_ws_sessions[user_id] = {"task": task, "qr_code": None}
+            await asyncio.wait_for(qr_ready_event.wait(), timeout=timeout)
+            session = self.active_ws_sessions.get(user_id)
+            if session and session["qr_code"]:
+                return session["qr_code"], 200
+        except asyncio.TimeoutError:
+            await self._cancel_existing_session(user_id)
+            raise Exception(f"Failed to get QR code within {timeout} seconds")
+        except Exception as e:
+            await self._cancel_existing_session(user_id)
+            raise HTTPException(status_code=500, detail=f"internal server error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve QR code")
+
+    async def _manage_qr_session(
+        self, websocket_url: str, user_id: str, qr_ready_event: asyncio.Event
+    ):
+        print(f"[QR] Started session for {user_id}")
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(
                     websocket_url, headers=self.headers
                 ) as ws:
-                    message = await ws.receive()
-                    message_data = json.loads(message.data)
-                    return message_data, 200
+                    await self._handle_qr_websocket_session(ws, user_id, qr_ready_event)
+
+        except asyncio.CancelledError:
+            print(f"[QR] Cancelled for {user_id}")
+            raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"internal server error: {e}")
+            print(f"[QR] Error for {user_id}: {e}")
+        finally:
+            self.active_ws_sessions.pop(user_id, None)
+            print(f"[QR] Session ended for {user_id}")
+
+    async def _handle_qr_websocket_session(
+        self,
+        ws: aiohttp.ClientWebSocketResponse,
+        user_id: str,
+        qr_ready_event: asyncio.Event,
+    ):
+        message = await ws.receive()
+        message_data = json.loads(message.data)
+        if user_id in self.active_ws_sessions:
+            self.active_ws_sessions[user_id]["qr_code"] = message_data
+            qr_ready_event.set()
+        timeout = 120
+        start_time = asyncio.get_event_loop().time()
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            remaining = timeout - elapsed
+            if remaining <= 0:
+                print(f"[QR] Timeout (2 min) for {user_id}")
+                break
+            try:
+                message = await asyncio.wait_for(ws.receive(), timeout=remaining)
+                if message.type == aiohttp.WSMsgType.TEXT:
+                    data = json.loads(message.data)
+                    print(f"[QR] Message for {user_id}: {data}")
+                    if data.get("success"):
+                        print(f"[QR] Login successful for {user_id}")
+                        break
+                elif message.type == aiohttp.WSMsgType.CLOSED:
+                    print(f"[QR] WebSocket closed for {user_id}")
+                    break
+            except asyncio.TimeoutError:
+                print(f"[QR] Timeout for {user_id}")
+                break
 
     async def logout(self, user_id: str) -> tuple[dict[str, Any], int]:
         return await self._make_request("POST", f"/logout?user_id={user_id}")
